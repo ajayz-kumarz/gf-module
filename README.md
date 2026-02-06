@@ -1,11 +1,12 @@
 # Grafana Azure AD Module
 
-This Terraform module manages Grafana dashboards on an Azure Managed Grafana instance. It supports recursive folder structures and Azure Entra ID (Azure AD) authentication via the provider configuration.
+This Terraform module manages Grafana dashboards on an Azure Managed Grafana instance. It supports recursive folder structures, cross-platform path handling, and Azure Entra ID (Azure AD) authentication.
 
 ## Features
 
-- **Recursive Folder Mapping**: Creates Grafana Folders based on the directory structure of your JSON files (e.g., `Team-A/Service-B/dash.json` -> Folder "Team-A/Service-B").
-- **Dashboard Import**: detailed support for importing JSON dashboards.
+- **Nested Folder Support**: Automatically creates Grafana folders based on your directory structure (supports up to **5 levels** of nesting).
+- **Cross-Platform Compatibility**: Handles path separators correctly on both **Windows** (backslashes) and **Linux/macOS** (forward slashes).
+- **Dashboard Import**: Seamlessly imports JSON dashboards into their respective folders.
 - **Provider Agnostic**: The module logic focuses on resources, allowing you to configure the provider (Azure AD, API Key, etc.) at the root level.
 
 ## Prerequisites
@@ -33,8 +34,6 @@ my-terraform-project/
 
 ### 2. Terraform Configuration (`main.tf`)
 
-You must configure the `grafana` provider with the Azure AD token.
-
 ```hcl
 terraform {
   required_providers {
@@ -50,6 +49,8 @@ provider "azurerm" {
 
 # --- Authentication Logic ---
 # Get Azure AD Token for Grafana
+# NOTE for Windows: You may need to use ["powershell", "-Command", "..."] 
+# if 'bash' is not available.
 data "external" "grafana_token" {
   program = ["bash", "-c", "az account get-access-token --resource https://grafana.azure.com/ --query '{token:accessToken}' -o json"]
 }
@@ -70,25 +71,31 @@ module "grafana_dashboards" {
 
 ## Importing Existing Dashboards
 
-To bring existing Grafana resources under Terraform management:
+To bring existing Grafana resources under Terraform management, you must import them into the correct level resource.
 
-1.  **Match the File**: Save the dashboard JSON to your local `dashboards` directory in the correct subfolder.
-2.  **Get UID**: Find the dashboard UID from the Grafana URL or JSON.
-3.  **Import**:
+### 1. Match the File
+Save the dashboard JSON to your local `dashboards` directory in the correct subfolder.
 
-    **Folder Import:**
-    If the folder already exists in Grafana, you must import it too to avoid conflicts.
-    ```bash
-    # Root level folder
-    terraform import 'module.grafana_dashboards.grafana_folder.folders["Team-A"]' existing-folder-uid
+### 2. Import Folders
+Folders are split into levels (`l1` to `l5`) based on their depth.
 
-    # Nested subfolder
-    terraform import 'module.grafana_dashboards.grafana_folder.folders["Team-B/Ops"]' existing-subfolder-uid
-    ```
+```bash
+# Level 1 (Root folder)
+terraform import 'module.grafana_dashboards.grafana_folder.folders_l1["Team-A"]' <uid>
 
-    **Dashboard Import:**
-    ```bash
-    # Dashboard in a subfolder
-    # Format: module.<module_name>.grafana_dashboard.dashboards["<relative_path_to_file>"] <uid>
-    terraform import 'module.grafana_dashboards.grafana_dashboard.dashboards["Team-B/Ops/db-stats.json"]' existing-uid-456
-    ```
+# Level 2 (Subfolder)
+terraform import 'module.grafana_dashboards.grafana_folder.folders_l2["Team-A/Ops"]' <uid>
+
+# Level 3 (Sub-subfolder)
+terraform import 'module.grafana_dashboards.grafana_folder.folders_l3["Team-A/Ops/Prod"]' <uid>
+```
+
+### 3. Import Dashboards
+Use the relative path from your dashboards directory as the key.
+
+```bash
+# Dashboard in a subfolder
+terraform import 'module.grafana_dashboards.grafana_dashboard.dashboards["Team-A/Ops/app-metrics.json"]' <uid>
+```
+
+*Note: Always use forward slashes (`/`) in the Terraform keys, even on Windows.*
