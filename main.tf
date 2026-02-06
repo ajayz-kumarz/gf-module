@@ -12,9 +12,9 @@ locals {
   
   # Map: { "relative_file_path" = { content = "...", folder_path = "..." } }
   dashboards_map = {
-    for f in local.dashboard_files : f => {
+    for f in local.dashboard_files : replace(f, "\\", "/") => {
       content     = file("${local.dashboards_dir_normalized}/${f}")
-      folder_path = dirname(f)
+      folder_path = replace(dirname(f), "\\", "/")
       filename    = basename(f)
       # Create a stable slug/ID from the filename or content if needed
       slug        = replace(basename(f), ".json", "")
