@@ -13,13 +13,13 @@ locals {
       json_content = jsondecode(file("${local.dashboards_dir_normalized}/${f}"))
       
       # Sanitize: Remove fields that cause drift or are managed by Grafana/Terraform
-      # - time: We ignore this so UI changes to time ranges don't cause drift (mostly).
       # - id: Managed by Grafana (internal database ID).
       # - version: Managed by Grafana (optimistic locking).
       # - uid: MUST be preserved so Grafana knows which dashboard to update.
+      # Note: We keep 'time' because removing it causes perpetual drift (Grafana adds it back).
       content = jsonencode({
         for k, v in jsondecode(file("${local.dashboards_dir_normalized}/${f}")) : 
-        k => v if !contains(["time", "id", "version"], k)
+        k => v if !contains(["id", "version"], k)
       })
 
       folder_path = replace(dirname(f), "\\", "/")
