@@ -16,10 +16,10 @@ locals {
       # - time: We ignore this so UI changes to time ranges don't cause drift (mostly).
       # - id: Managed by Grafana (internal database ID).
       # - version: Managed by Grafana (optimistic locking).
-      # - uid: Managed by our Terraform resource logic (md5 or existing).
+      # - uid: MUST be preserved so Grafana knows which dashboard to update.
       content = jsonencode({
         for k, v in jsondecode(file("${local.dashboards_dir_normalized}/${f}")) : 
-        k => v if !contains(["time", "id", "version", "uid"], k)
+        k => v if !contains(["time", "id", "version"], k)
       })
 
       folder_path = replace(dirname(f), "\\", "/")
