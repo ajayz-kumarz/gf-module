@@ -1,6 +1,10 @@
 locals {
+  # Normalize path separators to forward slashes for consistency
+  # This ensures that even if a Windows path with backslashes is provided, we use forward slashes internally.
+  dashboards_dir_normalized = replace(var.dashboards_dir, "\\", "/")
+
   # Find all JSON files in the dashboards directory recursively
-  dashboard_files = fileset(var.dashboards_dir, "**/*.json")
+  dashboard_files = fileset(local.dashboards_dir_normalized, "**/*.json")
 
   # Extract unique directory paths from the file list to create folders.
   # If a file is at "team-a/service-b/dash.json", the folder path is "team-a/service-b".
@@ -9,7 +13,7 @@ locals {
   # Map: { "relative_file_path" = { content = "...", folder_path = "..." } }
   dashboards_map = {
     for f in local.dashboard_files : f => {
-      content     = file("${var.dashboards_dir}/${f}")
+      content     = file("${local.dashboards_dir_normalized}/${f}")
       folder_path = dirname(f)
       filename    = basename(f)
       # Create a stable slug/ID from the filename or content if needed

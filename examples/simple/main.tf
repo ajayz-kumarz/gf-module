@@ -21,6 +21,9 @@ provider "azurerm" {
 
 # --- Azure AD Authentication for Grafana ---
 # Fetch the access token for the Grafana Resource ID
+# NOTE: This example uses 'bash' which works on Linux/macOS. 
+# For Windows, you may need to use ["powershell", "-Command", "..."] or ["cmd", "/C", "az ..."]
+# or ensure you have a bash environment available.
 data "external" "grafana_token" {
   program = ["bash", "-c", "az account get-access-token --resource https://grafana.azure.com/ --query '{token:accessToken}' -o json"]
 }
