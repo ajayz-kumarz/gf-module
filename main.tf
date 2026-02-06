@@ -1,54 +1,92 @@
 locals {
   # Normalize path separators to forward slashes for consistency
-  # This ensures that even if a Windows path with backslashes is provided, we use forward slashes internally.
   dashboards_dir_normalized = replace(var.dashboards_dir, "\\", "/")
 
   # Find all JSON files in the dashboards directory recursively
   dashboard_files = fileset(local.dashboards_dir_normalized, "**/*.json")
 
-  # Extract unique directory paths from the file list to create folders.
-  # If a file is at "team-a/service-b/dash.json", the folder path is "team-a/service-b".
-  # If a file is at root "dash.json", the folder path is "." which we map to General or ignore.
-  
-  # Map: { "relative_file_path" = { content = "...", folder_path = "..." } }
-  dashboards_map = {
+  # 1. Map files to their specific folder path
+  #    Team-A/Ops/db.json -> folder_path = "Team-A/Ops"
+  file_folder_map = {
     for f in local.dashboard_files : replace(f, "\\", "/") => {
       content     = file("${local.dashboards_dir_normalized}/${f}")
       folder_path = replace(dirname(f), "\\", "/")
       filename    = basename(f)
-      # Create a stable slug/ID from the filename or content if needed
-      slug        = replace(basename(f), ".json", "")
     }
   }
 
-  # Identify unique folder paths (excluding root ".")
-  folder_paths = distinct([
-    for v in local.dashboards_map : v.folder_path if v.folder_path != "."
+  # 2. Extract ALL explicit folder paths from the files
+  raw_folder_paths = distinct([
+    for v in local.file_folder_map : v.folder_path if v.folder_path != "."
   ])
+
+  # 3. Expand implicit parent paths. 
+  #    If we have "A/B/C", we need ensure "A" and "A/B" are also in our list.
+  #    We handle up to 3 levels of nesting.
+  all_folders_expanded = flatten([
+    for path in local.raw_folder_paths : [
+      # The path itself (e.g. A/B)
+      path,
+      # Its parent (e.g. A) - if it contains a slash
+      length(regexall("/", path)) > 0 ? dirname(path) : null,
+      # Its grandparent (e.g. if A/B/C -> parent is A/B, grandparent is A)
+      length(regexall("/", path)) > 1 ? dirname(dirname(path)) : null
+    ]
+  ])
+
+  # Clean up the list: remove nulls, remove ".", distinct values
+  unique_folders = distinct([
+    for p in local.all_folders_expanded : p if p != null && p != "."
+  ])
+
+  # 4. Split by depth for Terraform sequencing (Level 1 = Root, Level 2 = Nested, etc.)
+  #    Level 1: "Team-A" (0 slashes)
+  folders_l1 = toset([for p in local.unique_folders : p if length(regexall("/", p)) == 0])
+  
+  #    Level 2: "Team-A/Ops" (1 slash)
+  folders_l2 = toset([for p in local.unique_folders : p if length(regexall("/", p)) == 1])
+
+  #    Level 3: "Team-A/Ops/Deploys" (2 slashes)
+  folders_l3 = toset([for p in local.unique_folders : p if length(regexall("/", p)) == 2])
 }
 
-# 1. Create Grafana Folders based on the directory structure
-resource "grafana_folder" "folders" {
-  for_each = toset(local.folder_paths)
+# --- LEVEL 1 FOLDERS (ROOT) ---
+resource "grafana_folder" "folders_l1" {
+  for_each = local.folders_l1
+  title    = each.key
+}
 
-  # Title will be the directory path. 
-  # Note: Grafana folders are traditionally flat. 
-  # If you have "A/B", this will create a folder named "A/B".
-  # To support true nested folders (Grafana 11+ feature), you'd need more complex logic 
-  # creating parent then child. For compatibility, we use the path as the name.
-  title = each.key
+# --- LEVEL 2 FOLDERS (NESTED) ---
+resource "grafana_folder" "folders_l2" {
+  for_each = local.folders_l2
+
+  title             = basename(each.key)
+  parent_folder_uid = grafana_folder.folders_l1[dirname(each.key)].uid
+}
+
+# --- LEVEL 3 FOLDERS (DEEP NESTED) ---
+resource "grafana_folder" "folders_l3" {
+  for_each = local.folders_l3
+
+  title             = basename(each.key)
+  parent_folder_uid = grafana_folder.folders_l2[dirname(each.key)].uid
 }
 
 # 2. Create Dashboards
 resource "grafana_dashboard" "dashboards" {
-  for_each = local.dashboards_map
+  for_each = local.file_folder_map
 
   config_json = each.value.content
 
-  # If the file is in the root, folder is null (General folder).
-  # Otherwise, look up the folder UID from the created folders.
-  folder = each.value.folder_path == "." ? null : grafana_folder.folders[each.value.folder_path].uid
+  # Determine which folder resource to look up.
+  # We check the depth of the folder_path to decide which map to access.
+  folder = (
+    each.value.folder_path == "." ? null :
+    contains(local.folders_l3, each.value.folder_path) ? grafana_folder.folders_l3[each.value.folder_path].uid :
+    contains(local.folders_l2, each.value.folder_path) ? grafana_folder.folders_l2[each.value.folder_path].uid :
+    contains(local.folders_l1, each.value.folder_path) ? grafana_folder.folders_l1[each.value.folder_path].uid :
+    null
+  )
   
-  # Optional: overwrite behavior
   overwrite = true
 }
