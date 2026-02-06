@@ -7,6 +7,7 @@ This Terraform module manages Grafana dashboards on an Azure Managed Grafana ins
 - **Nested Folder Support**: Automatically creates Grafana folders based on your directory structure (supports up to **5 levels** of nesting).
 - **Cross-Platform Compatibility**: Handles path separators correctly on both **Windows** (backslashes) and **Linux/macOS** (forward slashes).
 - **Dashboard Import**: Seamlessly imports JSON dashboards into their respective folders.
+- **Drift Management**: Automatically strips volatile fields (`id`, `uid`, `version`, `time`) from dashboard JSON files to minimize drift and allow Grafana to manage these properties.
 - **Provider Agnostic**: The module logic focuses on resources, allowing you to configure the provider (Azure AD, API Key, etc.) at the root level.
 
 ## Prerequisites

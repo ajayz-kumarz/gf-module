@@ -9,7 +9,19 @@ locals {
   #    Team-A/Ops/db.json -> folder_path = "Team-A/Ops"
   file_folder_map = {
     for f in local.dashboard_files : replace(f, "\\", "/") => {
-      content     = file("${local.dashboards_dir_normalized}/${f}")
+      # Read and parse the JSON
+      json_content = jsondecode(file("${local.dashboards_dir_normalized}/${f}"))
+      
+      # Sanitize: Remove fields that cause drift or are managed by Grafana/Terraform
+      # - time: We ignore this so UI changes to time ranges don't cause drift (mostly).
+      # - id: Managed by Grafana (internal database ID).
+      # - version: Managed by Grafana (optimistic locking).
+      # - uid: Managed by our Terraform resource logic (md5 or existing).
+      content = jsonencode({
+        for k, v in jsondecode(file("${local.dashboards_dir_normalized}/${f}")) : 
+        k => v if !contains(["time", "id", "version", "uid"], k)
+      })
+
       folder_path = replace(dirname(f), "\\", "/")
       filename    = basename(f)
     }
