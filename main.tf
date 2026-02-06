@@ -22,14 +22,7 @@ locals {
 
   # 3. Expand implicit parent paths. 
   #    We want to ensure that if "A/B/C" exists, "A" and "A/B" are also created.
-  #    Since we are using a flat loop now, we need to generate all parent combinations.
-  #    (This simple logic covers reasonable depth, but to be truly infinite 
-  #     without hardcoding, we'd need a recursive module or external data. 
-  #     However, we can just map broadly enough here.)
-  
-  #    Let's use a trick to explode paths: "A/B/C" -> ["A", "A/B", "A/B/C"]
-  #    We can stick to the previous expansion logic but maybe add a couple more levels to be safe,
-  #    OR since we are doing 5 levels requested, let's explicitly expand up to 5 levels here.
+  #    We expand up to 5 levels.
   all_folders_expanded = flatten([
     for path in local.raw_folder_paths : [
       path,
@@ -48,25 +41,56 @@ locals {
   unique_folders = distinct([
     for p in local.all_folders_expanded : p if p != null && p != "."
   ])
+
+  # 4. Split by depth for Terraform sequencing (Level 1 = Root, Level 2 = Nested, etc.)
+  #    Level 1: "Team-A" (0 slashes)
+  folders_l1 = toset([for p in local.unique_folders : p if length(regexall("/", p)) == 0])
+  
+  #    Level 2: "Team-A/Ops" (1 slash)
+  folders_l2 = toset([for p in local.unique_folders : p if length(regexall("/", p)) == 1])
+
+  #    Level 3: "Team-A/Ops/Deploys" (2 slashes)
+  folders_l3 = toset([for p in local.unique_folders : p if length(regexall("/", p)) == 2])
+
+  #    Level 4: "Team-A/Ops/Deploys/Prod" (3 slashes)
+  folders_l4 = toset([for p in local.unique_folders : p if length(regexall("/", p)) == 3])
+
+  #    Level 5: "Team-A/Ops/Deploys/Prod/East" (4 slashes)
+  folders_l5 = toset([for p in local.unique_folders : p if length(regexall("/", p)) == 4])
 }
 
-# --- UNIFIED FOLDER RESOURCE (Infinite Depth via Deterministic UIDs) ---
-resource "grafana_folder" "folders" {
-  for_each = toset(local.unique_folders)
+# --- LEVEL 1 FOLDERS (ROOT) ---
+resource "grafana_folder" "folders_l1" {
+  for_each = local.folders_l1
+  title    = each.key
+}
 
-  title = basename(each.key)
-  
-  # Generate a stable UID based on the path.
-  # This breaks the dependency cycle because we don't need to look up the parent resource.
-  # We just know what the parent's UID *will* be.
-  uid = md5(each.key)
+# --- LEVEL 2 FOLDERS ---
+resource "grafana_folder" "folders_l2" {
+  for_each = local.folders_l2
+  title             = basename(each.key)
+  parent_folder_uid = grafana_folder.folders_l1[dirname(each.key)].uid
+}
 
-  # Calculate Parent UID
-  parent_folder_uid = (
-    dirname(each.key) == "." ? 
-    null : 
-    md5(dirname(each.key))
-  )
+# --- LEVEL 3 FOLDERS ---
+resource "grafana_folder" "folders_l3" {
+  for_each = local.folders_l3
+  title             = basename(each.key)
+  parent_folder_uid = grafana_folder.folders_l2[dirname(each.key)].uid
+}
+
+# --- LEVEL 4 FOLDERS ---
+resource "grafana_folder" "folders_l4" {
+  for_each = local.folders_l4
+  title             = basename(each.key)
+  parent_folder_uid = grafana_folder.folders_l3[dirname(each.key)].uid
+}
+
+# --- LEVEL 5 FOLDERS ---
+resource "grafana_folder" "folders_l5" {
+  for_each = local.folders_l5
+  title             = basename(each.key)
+  parent_folder_uid = grafana_folder.folders_l4[dirname(each.key)].uid
 }
 
 # 2. Create Dashboards
@@ -75,16 +99,17 @@ resource "grafana_dashboard" "dashboards" {
 
   config_json = each.value.content
 
-  # We compute the folder UID directly from the path string.
-  # No need to lookup the folder resource.
+  # Determine which folder resource to look up.
+  # We check the depth of the folder_path to decide which map to access.
   folder = (
-    each.value.folder_path == "." ? 
-    null : 
-    md5(each.value.folder_path)
+    each.value.folder_path == "." ? null :
+    contains(local.folders_l5, each.value.folder_path) ? grafana_folder.folders_l5[each.value.folder_path].uid :
+    contains(local.folders_l4, each.value.folder_path) ? grafana_folder.folders_l4[each.value.folder_path].uid :
+    contains(local.folders_l3, each.value.folder_path) ? grafana_folder.folders_l3[each.value.folder_path].uid :
+    contains(local.folders_l2, each.value.folder_path) ? grafana_folder.folders_l2[each.value.folder_path].uid :
+    contains(local.folders_l1, each.value.folder_path) ? grafana_folder.folders_l1[each.value.folder_path].uid :
+    null
   )
   
   overwrite = true
-  
-  # Ensure the dashboard is created AFTER the folder exists
-  depends_on = [grafana_folder.folders]
 }
