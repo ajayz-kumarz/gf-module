@@ -95,8 +95,22 @@ terraform import 'module.grafana_dashboards.grafana_folder.folders_l3["Team-A/Op
 Use the relative path from your dashboards directory as the key.
 
 ```bash
-# Dashboard in a subfolder
-terraform import 'module.grafana_dashboards.grafana_dashboard.dashboards["Team-A/Ops/app-metrics.json"]' <uid>
-```
+## Folder Management Approach Comparison
 
-*Note: Always use forward slashes (`/`) in the Terraform keys, even on Windows.*
+This module uses a **Level-Based (L1-L5)** strategy to manage nested folders. Below is a comparison with the alternative **Deterministic UID** approach.
+
+| Feature | **Deterministic UID (MD5)** | **Level-Based (L1-L5)** |
+| :--- | :--- | :--- |
+| **Primary Mechanism** | Folder UIDs forced to `md5(path)`. | Folder UIDs randomly assigned or preserved. |
+| **Nesting Depth** | **Unlimited** (Infinite). | Limited to explicit levels (current: **5**). |
+| **Importing Resources** | **Disruptive**. Forces UID change. | **Seamless**. Preserves existing UIDs. |
+| **Existing Links** | **Breaks Links**. URLs will 404. | **Safe**. Links remain valid. |
+| **Dependency Cycles** | Eliminated via string math. | Managed via resource layers. |
+| **Best Use Case** | Greenfield / Total Control. | Brownfield / Existing Environments. |
+
+### Why Level-Based?
+
+We chose the **Level-Based (L1-L5)** approach because:
+1.  **Import Stability**: You can import existing folders without forcing a UID change.
+2.  **Safety**: It prevents breaking existing bookmarks or external links.
+3.  **Flexibility**: 5 levels cover the vast majority of enterprise organizational needs.
